@@ -1,8 +1,9 @@
 #include <SpringBoard/SpringBoard.h>
 
-%hook SBIconBadge
-- (id)initWithBadgeString:(id)string { return nil; }
-- (id)initWithFrame:(CGRect)frame { return nil; }
+// Works on iOS5, hopefully on iOS4 (this method is there)
+
+%hook SBIcon
+- (id)badgeNumberOrString {
+	return nil;
+}
 %end
-
-
