@@ -1,5 +1,9 @@
 {
-    title = "appslide";
-    description = "like a back button. but better.";
-    "compatible-modes" = ("springboard", "application");
+	title = appslide;
+	description = "like a back button. but better.";
+	"receives-raw-events" = YES;
+	"compatible-modes" = (
+		springboard,
+		application,
+	);
 }

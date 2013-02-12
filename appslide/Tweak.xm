@@ -1,4 +1,3 @@
-
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
@@ -33,9 +32,10 @@ static NSArray *Make(NSString *previous, NSString *next) {
 %end
 
 %hook SBUIController
+
 - (void)activateURLFromBulletinList:(id)bulletinList {
     // don't slide in from notification center widgets
-    enabled -= 1;
+    enabled -= 1;	
     %orig;
 }
 
@@ -57,17 +57,50 @@ static void begintransition(id from, id to) {
 }
 %end
 
+%hook SBBannerController
+//disable appslide when a "slid-up" app is already in view
+- (void)_handleBannerTapGesture:(id)arg1
+{
+	if (appstack.count > 0)
+		enabled -= 1;
+	%orig;
+}
+
+%end
+
+@interface SBAppToAppTransitionController
+- (UIApplication *)deactivatingApp;
+- (UIApplication *)activatingApp;
+@end
+
+%hook SBAppToAppTransitionController
+//iOS 6 fix. _beginAppToAppTransition:to: and _beginTransitionFromApp:toApp: do not exist anymore
+- (void)_startAnimation
+{	
+	if (self.activatingApp != nil && self.deactivatingApp != nil)
+	{
+		fromapp = self.deactivatingApp;
+		toapp = self.activatingApp;		
+	}
+	else
+	{
+		enabled -= 1;
+	}	
+	
+	%orig;
+}
+
+%end
+
 %hook SBAppDosadoView
 static BOOL transition(id self) {
     if (enabled <= 0) {
         // after a non-enabled transition, drop all
         // state so we don't try and go back from that
         // or something equally weird like that.
-
         enabled = 1;
         [appstack removeAllObjects];
-
-        return YES;
+	    return YES;
     }
 
     UIView *from = MSHookIvar<UIView *>(self, "_fromView");
@@ -131,17 +164,18 @@ static BOOL ignore = NO;
 - (void)stopIgnoring {
     ignore = NO;
 }
-- (void)activator:(id)activator receiveEvent:(id)event {
+- (void)activator:(id)activator receiveEvent:(id)event 
+{       
     if (ignore) {
         [event setHandled:YES];
         return;
     }
 
     if ([appstack count] > 0 && Previous([appstack lastObject]) != nil) {
-        SlideToApp(Previous([appstack lastObject]));
-        [event setHandled:YES];
-        ignore = YES;
-        [self performSelector:@selector(stopIgnoring) withObject:nil afterDelay:0.6f];
+    	SlideToApp(Previous([appstack lastObject]));
+    	[event setHandled:YES];
+       	ignore = YES;
+	   	[self performSelector:@selector(stopIgnoring) withObject:nil afterDelay:0.6f];
     }
 }
 @end
@@ -154,6 +188,7 @@ __attribute__((constructor)) static void init() {
     listener = [[AppSlideActivator alloc] init];
 
     // default to single home button press
+    // single press is messed in iOS6, so hardcode activator menu single press action
     id la = [objc_getClass("LAActivator") sharedInstance];
     if ([la respondsToSelector:@selector(hasSeenListenerWithName:)] && [la respondsToSelector:@selector(assignEvent:toListenerWithName:)])
         if (![la hasSeenListenerWithName:@"com.chpwn.appslide"])
