@@ -120,11 +120,11 @@ static NSString *peak() {
 
     id la = [%c(LAActivator) sharedInstance];
     if ([la respondsToSelector:@selector(hasSeenListenerWithName:)] && [la respondsToSelector:@selector(assignEvent:toListenerWithName:)]) {
-        if (![la hasSeenListenerWithName:@"com.twodayslate.slideback"]) {
-            [la assignEvent:[%c(LAEvent) eventWithName:@"libactivator.menu.press.single"] toListenerWithName:@"com.twodayslate.slideback"];
+        if (![la hasSeenListenerWithName:@"com.chpwn.appslide"]) {
+            [la assignEvent:[%c(LAEvent) eventWithName:@"libactivator.menu.press.single"] toListenerWithName:@"com.chpwn.appslide"];
         }
     }
 
     // register our listener. do this after the above so it still hasn't "seen" us if this is first launch
-    [[%c(LAActivator) sharedInstance] registerListener:listener forName:@"com.twodayslate.slideback"]; // can also be done in +load https://github.com/nickfrey/NowNow/blob/master/Tweak.xm#L31
+    [[%c(LAActivator) sharedInstance] registerListener:listener forName:@"com.chpwn.appslide"]; // can also be done in +load https://github.com/nickfrey/NowNow/blob/master/Tweak.xm#L31
 }
