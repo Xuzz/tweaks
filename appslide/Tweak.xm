@@ -1,210 +1,130 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import "CydiaSubstrate.h"
+#import "LAListener.h"
 
-static int enabled = 1;
-static NSMutableArray *appstack = [[NSMutableArray alloc] init];
-static id toapp = nil;
-static id fromapp = nil;
-
-static void SlideToApp(NSString *identifier) {
-    id app = [[objc_getClass("SBApplicationController") sharedInstance] applicationWithDisplayIdentifier:identifier];
-    [[objc_getClass("SBUIController") sharedInstance] activateApplicationFromSwitcher:app];
-}
-
-static NSString *Previous(NSArray *element) {
-    return [element objectAtIndex:0];
-}
-
-static NSString *Next(NSArray *element) {
-    return [element objectAtIndex:1];
-}
-
-static NSArray *Make(NSString *previous, NSString *next) {
-    return [NSArray arrayWithObjects:previous, next, nil];
-}
-
-%hook SBAppSwitcherController
-
-- (void)iconTapped:(id)icon {
-    // don't slide if you tapped it in the switcher
-    enabled -= 1;
-    %orig;
-}
-
-%end
-
-%hook SBUIController
-
-- (void)activateURLFromBulletinList:(id)bulletinList {
-    // don't slide in from notification center widgets
-    enabled -= 1;
-    %orig;
-}
-
-static void begintransition(id from, id to) {
-    if (from != nil && to != nil) {
-        fromapp = from;
-        toapp = to;
-    } else {
-        enabled -= 1;
-    }
-}
-- (void)_beginTransitionFromApp:(id)from toApp:(id)to {
-    begintransition(from, to);
-    %orig;
-}
-- (void)_beginAppToAppTransition:(id)from to:(id)to {
-    begintransition(from, to);
-    %orig;
-}
-%end
-
-@interface SBAppToAppTransitionController
-- (UIApplication *)deactivatingApp;
-- (UIApplication *)activatingApp;
+@interface SBApplicationController
++(id)sharedInstance;
+-(id)applicationWithDisplayIdentifier:(id)arg1 ;
 @end
 
-// iOS 6+
-%hook SBAppToAppTransitionController
-
-- (void)_startAnimation {
-	if (self.activatingApp != nil && self.deactivatingApp != nil) {
-		fromapp = self.deactivatingApp;
-		toapp = self.activatingApp;
-	} else {
-		enabled -= 1;
-	}
-
-	%orig;
-}
-
-%end
-
-%hook SBBannerController
-
-// disable when a "slid-up" app is already in view
-- (void)_handleBannerTapGesture:(id)gesture {
-	if (appstack.count > 0) {
-		enabled -= 1;
-    }
-
-	%orig;
-}
-
-%end
-
-static BOOL transition(id self) {
-    if (enabled <= 0) {
-        // after a non-enabled transition, drop all
-        // state so we don't try and go back from that
-        // or something equally weird like that.
-        enabled = 1;
-        [appstack removeAllObjects];
-	    return YES;
-    }
-
-    UIView *from = MSHookIvar<UIView *>(self, "_fromView");
-    UIView *to = MSHookIvar<UIView *>(self, "_toView");
-
-    BOOL downwards = NO;
-
-    if ([appstack count] > 0 && [Previous([appstack lastObject]) isEqual:[toapp displayIdentifier]]) {
-        [appstack removeLastObject];
-        downwards = YES;
-    } else {
-        [appstack addObject:Make([fromapp displayIdentifier], [toapp displayIdentifier])];
-        downwards = NO;
-    }
-
-    [self addSubview:(downwards ? to : from)];
-    [self addSubview:(downwards ? from : to)];
-
-    CGRect start;
-    start.origin = CGPointMake(0, downwards ? 0 : [to bounds].size.height);
-    start.size = [to bounds].size;
-    [(downwards ? from : to) setFrame:start];
-
-    [UIView beginAnimations:nil context:NULL];
-    [UIView setAnimationDuration:0.5];
-    [UIView setAnimationDelegate:self];
-
-    if ([self respondsToSelector:@selector(_animationDidStop:)])
-        [UIView setAnimationDidStopSelector:@selector(_animationDidStop:)];
-    else if ([self respondsToSelector:@selector(animationDidStop:finished:)])
-        [UIView setAnimationDidStopSelector:@selector(animationDidStop:finished:)];
-
-    CGRect done;
-    done.origin = CGPointMake(0, downwards ? [to bounds].size.height : 0);
-    done.size = [to bounds].size;
-    [(downwards ? from : to) setFrame:done];
-
-    [UIView commitAnimations];
-
-    // reset enabled state for next time
-    enabled = 1;
-
-    return NO;
-}
-
-%hook SBAppDosadoView
-
-- (void)beginTransition {
-    if (transition(self)) %orig;
-}
-
-- (void)_beginTransition {
-    if (transition(self)) %orig;
-}
-
-%end
-
-// workaround some weird activator bug where it gives me
-// the same exact event twice in a row. wtf?
-static BOOL ignore = NO;
-
-@interface AppSlideActivator : NSObject { }
+@interface SBUIController
+-(void)activateApplicationAnimated:(id)arg1 ;
 @end
 
-@implementation AppSlideActivator
+@interface LAActivator
+-(id)hasSeenListenerWithName:(id)arg1;
+-(id)assignEvent:(id)arg1 toListenerWithName:(id)arg2;
+-(id)registerListener:(id)arg1 forName:(id)arg2;
+@end
 
-- (void)stopIgnoring {
-    ignore = NO;
+@interface LAEvent
++(id)eventWithName:(id)arg1; 
+-(id)setHandled:(BOOL)arg1;
+@end
+
+
+static NSMutableArray *stack = [[NSMutableArray alloc] init];
+
+static void SlideToApp(id identifier) {
+    //id app = [[%c(SBApplicationController) sharedInstance] applicationWithDisplayIdentifier:[identifier displayIdentifier]];
+    [[%c(SBUIController) sharedInstance] activateApplicationAnimated:identifier];
 }
 
+static void push(id element) {
+    [stack addObject:element];
+}
+
+static NSString *pop() {
+    id obj = [[[stack lastObject]retain]autorelease];
+    [stack removeLastObject];
+    return obj;
+}
+
+static void clear() { 
+    [stack removeAllObjects];
+}
+
+static NSString *peak() {
+    return [[[stack lastObject]retain]autorelease];
+}
+
+
+// %hook SBAppSliderIconControllerDelegate
+// -(void)sliderIconScroller:(id)arg1 activate:(id)arg2 {
+//  // Pretty sure this isn't needed but just in case...
+//  %orig;
+//  clear();
+// }
+// %end
+
+// %hook SBAppSliderIconController 
+// -(void)iconTapped:(id)arg1 {
+//  // Pretty sure this isn't needed but just in case...
+//  %orig;
+//  clear();
+// }
+// %end
+
+// %hook SBUIController
+// -(void)activateURLFromBulletinList:(id)arg1 {
+//  // Pretty sure this isn't needed but just in case...
+//  %orig;
+//  clear();
+// }
+// %end
+
+%hook SBAppToAppWorkspaceTransaction
+-(id)_setupAnimationFrom:(id)afrom to:(id)ato {
+    if(peak() == ato) {
+        pop();
+    } else if(afrom == NULL || ato == NULL) {
+        clear();
+    } else if (afrom == ato) {
+        return %orig;
+    }
+    else {
+        push(afrom);
+    }
+    return %orig;
+}
+%end
+
+@interface SlideBackActivator : NSObject <LAListener>
+@end
+
+@implementation SlideBackActivator
 - (void)activator:(id)activator receiveEvent:(id)event {
-    if (ignore) {
+    if([stack count] > 0) {
+        SlideToApp(peak());
         [event setHandled:YES];
-        return;
-    }
-
-    if ([appstack count] > 0 && Previous([appstack lastObject]) != nil) {
-        SlideToApp(Previous([appstack lastObject]));
-        [event setHandled:YES];
-        ignore = YES;
-        [self performSelector:@selector(stopIgnoring) withObject:nil afterDelay:0.6f];
     }
 }
+- (NSString *)activator:(LAActivator *)activator requiresLocalizedTitleForListenerName:(NSString *)listenerName {
+    return @"slideback";
+}
+- (NSString *)activator:(LAActivator *)activator requiresLocalizedDescriptionForListenerName:(NSString *)listenerName {
+    return @"Like a back button. But better.";
+}
+
+- (id)activator:(LAActivator *)activator requiresInfoDictionaryValueOfKey:(NSString *)key forListenerWithName:(NSString *)listenerName {
+    return [NSNumber numberWithBool:YES]; // HAX so it can send raw events. <3 rpetrich
+}
+
 @end
 
-__attribute__((constructor)) static void init() {
-    // make sure activator is loaded
+%ctor {
     dlopen("/usr/lib/libactivator.dylib", RTLD_LAZY);
 
-    static AppSlideActivator *listener = nil;
-    listener = [[AppSlideActivator alloc] init];
+    static SlideBackActivator *listener = [[SlideBackActivator alloc] init];
 
-    // default to single home button press
-    // single press is messed in iOS6, so hardcode activator menu single press action
-    id la = [objc_getClass("LAActivator") sharedInstance];
+    id la = [%c(LAActivator) sharedInstance];
     if ([la respondsToSelector:@selector(hasSeenListenerWithName:)] && [la respondsToSelector:@selector(assignEvent:toListenerWithName:)]) {
-        if (![la hasSeenListenerWithName:@"com.chpwn.appslide"]) {
-            [la assignEvent:[objc_getClass("LAEvent") eventWithName:@"libactivator.menu.press.single"] toListenerWithName:@"com.chpwn.appslide"];
+        if (![la hasSeenListenerWithName:@"com.twodayslate.slideback"]) {
+            [la assignEvent:[%c(LAEvent) eventWithName:@"libactivator.menu.press.single"] toListenerWithName:@"com.twodayslate.slideback"];
         }
     }
 
     // register our listener. do this after the above so it still hasn't "seen" us if this is first launch
-    [[objc_getClass("LAActivator") sharedInstance] registerListener:listener forName:@"com.chpwn.appslide"];
-
-    %init;
+    [[%c(LAActivator) sharedInstance] registerListener:listener forName:@"com.twodayslate.slideback"]; // can also be done in +load https://github.com/nickfrey/NowNow/blob/master/Tweak.xm#L31
 }
-
